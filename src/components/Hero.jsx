@@ -1,15 +1,14 @@
-import heroImg from '../assets/hero.png'
 import TypewriterText from './TypewriterText'
+import ParticleBackground from './ParticleBackground'
 
 export default function Hero() {
   return (
     <section className="relative w-full h-screen overflow-hidden bg-black">
-      <img
-        src={heroImg}
-        alt="Hero"
-        className="absolute inset-0 w-full h-full object-cover opacity-80"
-      />
-      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/75" />
+
+      <ParticleBackground />
+
+      <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/80 pointer-events-none" />
+
       <div className="absolute bottom-10 left-1/2 -translate-x-1/2 text-center text-white whitespace-nowrap">
         <div className="flex items-center justify-center gap-6 mb-4">
           <span className="w-1 h-1 rounded-full bg-white/40 inline-block" />
@@ -29,6 +28,7 @@ export default function Hero() {
           2023&mdash;Presente
         </p>
       </div>
+
       <div className="absolute bottom-10 right-16 flex flex-col items-center gap-1 animate-bounce">
         <svg
           width="16"
@@ -42,6 +42,7 @@ export default function Hero() {
           <polyline points="2,14 8,21 14,14" stroke="currentColor" strokeWidth="1" fill="none"/>
         </svg>
       </div>
+
     </section>
   )
 }
