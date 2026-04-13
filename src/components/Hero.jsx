@@ -1,11 +1,11 @@
 import TypewriterText from './TypewriterText'
-import ParticleBackground from './ParticleBackground'
+import AnimatedBackground from './AnimatedBackground'
 
 export default function Hero() {
   return (
-    <section className="relative w-full h-screen overflow-hidden" style={{backgroundColor: '#0f1117'}}>
+    <section className="relative w-full h-screen overflow-hidden" style={{ backgroundColor: '#0f1117', cursor: 'none' }}>
 
-      <ParticleBackground />
+      <AnimatedBackground />
 
       <div className="absolute inset-0 bg-gradient-to-b from-[#0f1117]/50 via-transparent to-[#0f1117]/80 pointer-events-none" />
 
@@ -38,8 +38,8 @@ export default function Hero() {
           xmlns="http://www.w3.org/2000/svg"
           className="text-white/50"
         >
-          <line x1="8" y1="0" x2="8" y2="20" stroke="currentColor" strokeWidth="1"/>
-          <polyline points="2,14 8,21 14,14" stroke="currentColor" strokeWidth="1" fill="none"/>
+          <line x1="8" y1="0" x2="8" y2="20" stroke="currentColor" strokeWidth="1" />
+          <polyline points="2,14 8,21 14,14" stroke="currentColor" strokeWidth="1" fill="none" />
         </svg>
       </div>
 

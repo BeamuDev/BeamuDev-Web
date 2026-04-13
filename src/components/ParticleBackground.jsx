@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 
 const CHARS = '01アイウエオカキクケコサシスセソBEAMUDabcdefghijklmnopqrstuvwxyz<>{}[]|/\\#@$%^&*+=~'.split('')
-const PARTICLE_COUNT = 1200
+const PARTICLE_COUNT = 900
 const PARTICLE_COUNT_SMALL = 800
 const BREAKPOINT = 768
 
