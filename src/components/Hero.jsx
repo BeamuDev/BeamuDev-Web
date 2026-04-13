@@ -3,11 +3,11 @@ import ParticleBackground from './ParticleBackground'
 
 export default function Hero() {
   return (
-    <section className="relative w-full h-screen overflow-hidden bg-black">
+    <section className="relative w-full h-screen overflow-hidden" style={{backgroundColor: '#0f1117'}}>
 
       <ParticleBackground />
 
-      <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/80 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-b from-[#0f1117]/50 via-transparent to-[#0f1117]/80 pointer-events-none" />
 
       <div className="absolute bottom-10 left-1/2 -translate-x-1/2 text-center text-white whitespace-nowrap">
         <div className="flex items-center justify-center gap-6 mb-4">
