@@ -25,7 +25,8 @@ const CIRCLE_RADIUS         = 0.72
 const GRID_SPACING       = 58
 const SPOT_RADIUS        = 270
 const MESH_BREATH_SPEED  = 0.009   // velocidad de respiración (lenta)
-const MESH_BREATH_AMP    = 5       // píxeles máx de desplazamiento ondulatorio
+const MESH_BREATH_AMP    = 14      // píxeles máx de desplazamiento ondulatorio
+const CUBE_DEPTH         = 28      // longitud de la arista de profundidad (px en pantalla)
 
 // ─── Shared palette ─────────────────────────────────────────────────────────
 const BLUE_PALETTE = [
@@ -66,12 +67,26 @@ export default function AnimatedBackground() {
     let glowOpacity    = GLOW_OPACITY_MIN
     let glowBlur       = 0
     let breathPhase    = 0
+    let outlineOpacity = 0
+    let pingRadius     = 0
+    let pingAlpha      = 0
+    let pingTimer      = 0
 
     // ── Vector state ──────────────────────────────────────────────────────
     let vectors        = []
     let vcols          = 0
     let vrows          = 0
     let meshBreathPhase = 0
+
+    // ── Back layer state ──────────────────────────────────────────────────
+    let backVectors    = []
+    let bvcols         = 0
+    let bvrows         = 0
+
+    // ── Third layer state ─────────────────────────────────────────────────
+    let thirdVectors   = []
+    let tvcols         = 0
+    let tvrows         = 0
 
     // ══════════════════════════════════════════════════════════════════════
     // PARTICLE HELPERS
@@ -172,6 +187,57 @@ export default function AnimatedBackground() {
     }
 
     // ══════════════════════════════════════════════════════════════════════
+    // BACK MESH (plano trasero del cubo, desplazado por CUBE_DX/DY)
+    // ══════════════════════════════════════════════════════════════════════
+    function buildBackVectors(w, h) {
+      backVectors = []
+      bvcols = vcols
+      bvrows = vrows
+      const cx = w / 2
+      const cy = h / 2
+
+      for (let row = 0; row < vrows; row++) {
+        for (let col = 0; col < vcols; col++) {
+          const fx  = col * GRID_SPACING
+          const fy  = row * GRID_SPACING
+          // Dirección desde el nodo hacia el punto de fuga (centro = B)
+          const dx  = cx - fx
+          const dy  = cy - fy
+          const len = Math.sqrt(dx * dx + dy * dy) || 1
+          // Nodo trasero: desplazado CUBE_DEPTH px en dirección al punto de fuga
+          const bx  = fx + (dx / len) * CUBE_DEPTH
+          const by  = fy + (dy / len) * CUBE_DEPTH
+          backVectors.push({ col, row, x: bx, y: by, color: randomBlue(), glow: 0 })
+        }
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // THIRD MESH (tercer plano, doble profundidad)
+    // ══════════════════════════════════════════════════════════════════════
+    function buildThirdVectors(w, h) {
+      thirdVectors = []
+      tvcols = vcols
+      tvrows = vrows
+      const cx = w / 2
+      const cy = h / 2
+
+      for (let row = 0; row < vrows; row++) {
+        for (let col = 0; col < vcols; col++) {
+          const fx  = col * GRID_SPACING
+          const fy  = row * GRID_SPACING
+          const dx  = cx - fx
+          const dy  = cy - fy
+          const len = Math.sqrt(dx * dx + dy * dy) || 1
+          // Doble profundidad respecto al frente
+          const tx  = fx + (dx / len) * CUBE_DEPTH * 2
+          const ty  = fy + (dy / len) * CUBE_DEPTH * 2
+          thirdVectors.push({ col, row, x: tx, y: ty, rx: tx, ry: ty, color: randomBlue(), glow: 0 })
+        }
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
     // B-MASK: qué nodos de la malla caen dentro/cerca de la B
     // ══════════════════════════════════════════════════════════════════════
     function computeBMask() {
@@ -217,6 +283,8 @@ export default function AnimatedBackground() {
       glowCanvasHvr = makeGlowCanvas(canvas.width, canvas.height, GLOW_BLUR_HOVER)
       initParticles(canvas.width, canvas.height)
       buildVectors(canvas.width, canvas.height)
+      buildBackVectors(canvas.width, canvas.height)
+      buildThirdVectors(canvas.width, canvas.height)
       computeBMask()
     }
 
@@ -224,54 +292,129 @@ export default function AnimatedBackground() {
     // DRAW HELPERS
     // ══════════════════════════════════════════════════════════════════════
     function drawCursor() {
-      const x      = mouseX
-      const y      = mouseY
-      const pulse  = Math.sin(time * 0.07) * 0.5 + 0.5
-      const tip    = 5
-      const size   = 24
-      const gap    = 7
-      const br     = 18
-      const bl     = 7
+      const x     = mouseX
+      const y     = mouseY
+      const pulse = Math.sin(time * 0.07) * 0.5 + 0.5
+      const rot   = time * 0.012   // rotación lenta sentido horario
+      const rotCC = time * -0.007  // rotación lenta sentido antihorario
+
+      // ── Ping periódico ────────────────────────────────────────────────
+      pingTimer++
+      if (pingTimer > 90) { pingTimer = 0; pingRadius = 0; pingAlpha = 0.7 }
+      if (pingAlpha > 0) {
+        pingRadius += 2.2
+        pingAlpha  *= 0.94
+        ctx.save()
+        ctx.beginPath(); ctx.arc(x, y, pingRadius, 0, Math.PI * 2)
+        ctx.strokeStyle = '#00aaff'
+        ctx.lineWidth   = 1.2
+        ctx.globalAlpha = pingAlpha * 0.5
+        ctx.stroke()
+        ctx.restore()
+      }
 
       ctx.save()
 
-      // Outer ring
-      ctx.beginPath(); ctx.arc(x, y, 20 + pulse * 5, 0, Math.PI * 2)
-      ctx.strokeStyle = '#00aaff'; ctx.globalAlpha = 0.08 + pulse * 0.1; ctx.lineWidth = 1; ctx.stroke()
+      // ── Halo exterior suave (gradiente radial) ────────────────────────
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, 65)
+      grad.addColorStop(0,   `rgba(0,120,255,${0.07 + pulse * 0.05})`)
+      grad.addColorStop(0.5, `rgba(0,60,180,${0.03 + pulse * 0.02})`)
+      grad.addColorStop(1,   'rgba(0,20,80,0)')
+      ctx.fillStyle   = grad
+      ctx.globalAlpha = 1
+      ctx.beginPath(); ctx.arc(x, y, 65, 0, Math.PI * 2); ctx.fill()
 
-      // Crosshair
-      ctx.strokeStyle = '#00cfff'; ctx.lineWidth = 1; ctx.globalAlpha = 0.9
-      ctx.beginPath()
-      ctx.moveTo(x - size, y); ctx.lineTo(x - gap, y)
-      ctx.moveTo(x + gap,  y); ctx.lineTo(x + size, y)
-      ctx.moveTo(x, y - size); ctx.lineTo(x, y - gap)
-      ctx.moveTo(x, y + gap);  ctx.lineTo(x, y + size)
-      ctx.stroke()
+      // ── Anillo exterior giratorio con segmentos ───────────────────────
+      ctx.strokeStyle = '#0077ff'
+      ctx.lineWidth   = 1.0
+      ctx.globalAlpha = 0.45 + pulse * 0.2
+      const segs = 10
+      for (let i = 0; i < segs; i++) {
+        const a0 = rot + (i / segs) * Math.PI * 2
+        const a1 = a0 + (Math.PI * 2 / segs) * 0.55
+        ctx.beginPath(); ctx.arc(x, y, 42, a0, a1); ctx.stroke()
+      }
 
-      // Arrow tips
-      ctx.fillStyle = '#00cfff'; ctx.globalAlpha = 0.9
-      const tri = (ax, ay, bx, by, cx, cy) => { ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill() }
-      tri(x + size + tip, y,         x + size, y - tip * 0.55, x + size, y + tip * 0.55)
-      tri(x - size - tip, y,         x - size, y - tip * 0.55, x - size, y + tip * 0.55)
-      tri(x, y + size + tip,         x - tip * 0.55, y + size, x + tip * 0.55, y + size)
-      tri(x, y - size - tip,         x - tip * 0.55, y - size, x + tip * 0.55, y - size)
+      // ── Anillo interior (contra-rotación) ─────────────────────────────
+      ctx.strokeStyle = '#00ccff'
+      ctx.lineWidth   = 0.7
+      ctx.globalAlpha = 0.55 + pulse * 0.15
+      const segs2 = 6
+      for (let i = 0; i < segs2; i++) {
+        const a0 = rotCC + (i / segs2) * Math.PI * 2
+        const a1 = a0 + (Math.PI * 2 / segs2) * 0.4
+        ctx.beginPath(); ctx.arc(x, y, 26, a0, a1); ctx.stroke()
+      }
 
-      // Center dot
-      ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2)
-      ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.85; ctx.fill()
+      // ── Cruz de mira (4 marcas en ejes cardinales) ───────────────────
+      ctx.strokeStyle = '#00eeff'
+      ctx.lineWidth   = 1.0
+      ctx.globalAlpha = 0.80
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2
+        ctx.beginPath()
+        ctx.moveTo(x + Math.cos(a) * 14, y + Math.sin(a) * 14)
+        ctx.lineTo(x + Math.cos(a) * 22, y + Math.sin(a) * 22)
+        ctx.stroke()
+      }
 
-      // Corner brackets
-      ctx.globalAlpha = 0.5 + pulse * 0.25; ctx.strokeStyle = '#3366ff'; ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.moveTo(x - br, y - br + bl); ctx.lineTo(x - br, y - br); ctx.lineTo(x - br + bl, y - br)
-      ctx.moveTo(x + br - bl, y - br); ctx.lineTo(x + br, y - br); ctx.lineTo(x + br, y - br + bl)
-      ctx.moveTo(x - br, y + br - bl); ctx.lineTo(x - br, y + br); ctx.lineTo(x - br + bl, y + br)
-      ctx.moveTo(x + br - bl, y + br); ctx.lineTo(x + br, y + br); ctx.lineTo(x + br, y + br - bl)
-      ctx.stroke()
+      // ── 4 marcas diagonales cortas ────────────────────────────────────
+      ctx.strokeStyle = '#3366ff'
+      ctx.lineWidth   = 0.8
+      ctx.globalAlpha = 0.50
+      for (let i = 0; i < 4; i++) {
+        const a = Math.PI / 4 + (i / 4) * Math.PI * 2
+        ctx.beginPath()
+        ctx.moveTo(x + Math.cos(a) * 30, y + Math.sin(a) * 30)
+        ctx.lineTo(x + Math.cos(a) * 38, y + Math.sin(a) * 38)
+        ctx.stroke()
+      }
 
-      // Coordinates
-      ctx.globalAlpha = 0.45; ctx.fillStyle = '#00aaff'; ctx.font = '9px monospace'
-      ctx.fillText(`x:${Math.round(x)}  y:${Math.round(y)}`, x + br + 4, y - br + 2)
+      // ── Punto central ─────────────────────────────────────────────────
+      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2)
+      ctx.fillStyle   = '#ffffff'
+      ctx.globalAlpha = 0.95
+      ctx.fill()
+
+      // ── Coordenadas HUD ───────────────────────────────────────────────
+      ctx.globalAlpha = 0.40
+      ctx.fillStyle   = '#00aaff'
+      ctx.font        = '9px monospace'
+      ctx.fillText(`${Math.round(x)}, ${Math.round(y)}`, x + 48, y - 8)
+
+      ctx.restore()
+    }
+
+    function drawBOutline(opacity) {
+      if (opacity < 0.004) return
+      const w  = canvas.width
+      const h  = canvas.height
+      const fs = Math.min(w, h) * 0.58
+      ctx.save()
+      ctx.font         = `900 ${fs}px 'Arial Black', Arial, sans-serif`
+      ctx.textAlign    = 'center'
+      ctx.textBaseline = 'middle'
+
+      // Capa exterior difuminada (halo)
+      ctx.filter      = 'blur(6px)'
+      ctx.strokeStyle = '#00aaff'
+      ctx.lineWidth   = 10
+      ctx.globalAlpha = opacity * 0.3
+      ctx.strokeText('B', w / 2, h / 2)
+
+      // Capa media con algo de blur
+      ctx.filter      = 'blur(2.5px)'
+      ctx.strokeStyle = '#3399ff'
+      ctx.lineWidth   = 5
+      ctx.globalAlpha = opacity * 0.55
+      ctx.strokeText('B', w / 2, h / 2)
+
+      // Trazo nítido interior
+      ctx.filter      = 'none'
+      ctx.strokeStyle = '#aaddff'
+      ctx.lineWidth   = 1.8
+      ctx.globalAlpha = opacity * 0.75
+      ctx.strokeText('B', w / 2, h / 2)
 
       ctx.restore()
     }
@@ -283,37 +426,243 @@ export default function AnimatedBackground() {
       time++
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-      // ── 1. VECTOR MESH (respiración + spotlight) ──────────────────────────
+      // ── Shared breath values ─────────────────────────────────────────────
       meshBreathPhase += MESH_BREATH_SPEED
-      const mBreath   = Math.sin(meshBreathPhase) * 0.5 + 0.5          // 0..1
-      const baseAlpha = 0.08 + mBreath * 0.07                          // 0.08..0.15, siempre visible
+      const mBreath     = Math.sin(meshBreathPhase) * 0.5 + 0.5
+      const globalPulse = Math.sin(time * 0.022) * 0.5 + 0.5
+      const waveFreq    = 0.0048
+      const waveSpeed   = 0.010
 
-      // Precomputar rx/ry (onda de respiración) y actualizar glow de cada nodo
+      // ── Iluminación de fondo sincronizada con la malla ───────────────────
+      {
+        const cx = canvas.width  / 2
+        const cy = canvas.height / 2
+        const maxR = Math.sqrt(cx * cx + cy * cy)
+
+        // Glow central — respira con mBreath
+        const glowIntensity = 0.10 + mBreath * 0.12 + globalPulse * 0.06   // 0.10 .. 0.28
+        const gradCenter = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR * 0.72)
+        gradCenter.addColorStop(0,    `rgba(10, 40, 140, ${glowIntensity})`)
+        gradCenter.addColorStop(0.35, `rgba(5,  20,  90, ${glowIntensity * 0.55})`)
+        gradCenter.addColorStop(0.70, `rgba(2,   8,  50, ${glowIntensity * 0.20})`)
+        gradCenter.addColorStop(1,    'rgba(0, 0, 0, 0)')
+        ctx.fillStyle   = gradCenter
+        ctx.globalAlpha = 1
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+        // Ola diagonal de luz — misma onda que las mallas
+        const wavePhase = time * waveSpeed
+        const waveAmp   = 0.05 + mBreath * 0.04
+        // Tres bandas diagonales superpuestas con distinto offset
+        for (const [ox, oy, alpha] of [
+          [0,      0,      waveAmp],
+          [cx * 0.4, cy * 0.4, waveAmp * 0.55],
+          [-cx * 0.3, cy * 0.6, waveAmp * 0.40],
+        ]) {
+          const bx = cx + ox
+          const by = cy + oy
+          const r  = maxR * (0.45 + mBreath * 0.15)
+          const wv = Math.sin((bx + by) * waveFreq - wavePhase) * 0.5 + 0.5
+          const gr = ctx.createRadialGradient(bx, by, 0, bx, by, r)
+          gr.addColorStop(0,   `rgba(15, 60, 200, ${alpha * wv})`)
+          gr.addColorStop(0.5, `rgba(5,  25, 110, ${alpha * wv * 0.4})`)
+          gr.addColorStop(1,   'rgba(0, 0, 0, 0)')
+          ctx.fillStyle   = gr
+          ctx.globalAlpha = 1
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+        }
+
+        // Viñeta perimetral — oscurece los bordes para dar profundidad
+        const vignette = ctx.createRadialGradient(cx, cy, maxR * 0.4, cx, cy, maxR * 1.1)
+        vignette.addColorStop(0, 'rgba(0,0,0,0)')
+        vignette.addColorStop(1, `rgba(0,0,8, ${0.55 + mBreath * 0.10})`)
+        ctx.fillStyle   = vignette
+        ctx.globalAlpha = 1
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+      }
+
+      // Precomputar rx/ry y centerFade de todas las mallas
+      const vcx = canvas.width  / 2
+      const vcy = canvas.height / 2
+      const FADE_R = GRID_SPACING * 4   // radio de desvanecimiento alrededor del centro
+
       for (let i = 0; i < vectors.length; i++) {
         const v  = vectors[i]
+
+        // CenterFade: 0 en el centro, 1 más allá de FADE_R
+        const distC = Math.sqrt((v.x - vcx) ** 2 + (v.y - vcy) ** 2)
+        v.centerFade = Math.pow(Math.min(distC / FADE_R, 1), 1.8)
+
+        // Malla frontal
         const wx = Math.sin(meshBreathPhase       + v.col * 0.32 + v.row * 0.11)
         const wy = Math.cos(meshBreathPhase * 0.8 + v.row * 0.28 + v.col * 0.14)
         v.rx = v.x + wx * MESH_BREATH_AMP * mBreath
         v.ry = v.y + wy * MESH_BREATH_AMP * mBreath
-
-        // Glow: sube rápido al pasar el spotlight, decae lento (rastro)
         const dv   = Math.sqrt((v.rx - mouseX) ** 2 + (v.ry - mouseY) ** 2)
         const spot = dv < SPOT_RADIUS ? Math.pow(1 - dv / SPOT_RADIUS, 2) : 0
         v.glow = spot > v.glow ? spot : v.glow * 0.965
+
+        // Malla trasera
+        const bv  = backVectors[i]
+        if (bv) {
+          const bdistC = Math.sqrt((bv.x - vcx) ** 2 + (bv.y - vcy) ** 2)
+          bv.centerFade = Math.pow(Math.min(bdistC / FADE_R, 1), 1.8)
+          const bwx = Math.sin(meshBreathPhase + Math.PI * 0.6 + bv.col * 0.28 + bv.row * 0.13)
+          const bwy = Math.cos(meshBreathPhase * 0.75 + Math.PI * 0.4 + bv.row * 0.24 + bv.col * 0.16)
+          bv.rx = bv.x + bwx * MESH_BREATH_AMP * 0.85 * mBreath
+          bv.ry = bv.y + bwy * MESH_BREATH_AMP * 0.85 * mBreath
+        }
+
+        // Tercer plano
+        const tv  = thirdVectors[i]
+        if (tv) {
+          const tdistC = Math.sqrt((tv.x - vcx) ** 2 + (tv.y - vcy) ** 2)
+          tv.centerFade = Math.pow(Math.min(tdistC / FADE_R, 1), 1.8)
+          const twx = Math.sin(meshBreathPhase + Math.PI * 1.2 + tv.col * 0.22 + tv.row * 0.18)
+          const twy = Math.cos(meshBreathPhase * 0.65 + Math.PI * 0.9 + tv.row * 0.20 + tv.col * 0.19)
+          tv.rx = tv.x + twx * MESH_BREATH_AMP * 0.70 * mBreath
+          tv.ry = tv.y + twy * MESH_BREATH_AMP * 0.70 * mBreath
+          const tdv   = Math.sqrt((tv.rx - mouseX) ** 2 + (tv.ry - mouseY) ** 2)
+          const tspot = tdv < SPOT_RADIUS ? Math.pow(1 - tdv / SPOT_RADIUS, 2) : 0
+          tv.glow = tspot > tv.glow ? tspot : tv.glow * 0.965
+        }
       }
+
+      // ── -1. THIRD MESH + DEPTH LINES back→third ──────────────────────────
+      {
+        ctx.save()
+        for (let i = 0; i < thirdVectors.length; i++) {
+          const tv = thirdVectors[i]
+          const bv = backVectors[i]
+          if (!tv || !bv) continue
+
+          // Aristas de profundidad back→third
+          const wave   = Math.sin((bv.rx + bv.ry) * waveFreq - time * waveSpeed) * 0.5 + 0.5
+          const dG     = (bv.glow + tv.glow) * 0.5
+          const cf     = Math.min(bv.centerFade ?? 1, tv.centerFade ?? 1)
+          const dA     = Math.max(0.20 + mBreath * 0.10 + wave * 0.10 + globalPulse * 0.06, dG * 0.6) * cf
+          ctx.globalAlpha = dA
+          ctx.strokeStyle = dG > 0.3 ? '#3366cc' : '#1a2e99'
+          ctx.lineWidth   = 0.5 + wave * 0.35 + dG * 0.55
+          ctx.beginPath(); ctx.moveTo(bv.rx, bv.ry); ctx.lineTo(tv.rx, tv.ry); ctx.stroke()
+        }
+
+        // Cara del tercer plano
+        for (let i = 0; i < thirdVectors.length; i++) {
+          const v    = thirdVectors[i]
+          const wave = Math.sin((v.rx + v.ry) * waveFreq - time * waveSpeed) * 0.5 + 0.5
+          const cf   = v.centerFade ?? 1
+          const baseA = Math.max(0.20 + mBreath * 0.10 + wave * 0.10 + globalPulse * 0.06, v.glow * 0.45) * cf
+          const lw    = 0.25 + wave * 0.25 + v.glow * 0.35
+
+          if (v.col < tvcols - 1) {
+            const r = thirdVectors[v.row * tvcols + v.col + 1]
+            if (r) {
+              ctx.globalAlpha = Math.max(baseA, (v.glow + r.glow) * 0.25)
+              ctx.strokeStyle = '#152888'
+              ctx.lineWidth   = lw
+              ctx.beginPath(); ctx.moveTo(v.rx, v.ry); ctx.lineTo(r.rx, r.ry); ctx.stroke()
+            }
+          }
+          if (v.row < tvrows - 1) {
+            const b = thirdVectors[(v.row + 1) * tvcols + v.col]
+            if (b) {
+              ctx.globalAlpha = Math.max(baseA, (v.glow + b.glow) * 0.25)
+              ctx.strokeStyle = '#152888'
+              ctx.lineWidth   = lw
+              ctx.beginPath(); ctx.moveTo(v.rx, v.ry); ctx.lineTo(b.rx, b.ry); ctx.stroke()
+            }
+          }
+          ctx.beginPath(); ctx.arc(v.rx, v.ry, 0.7 + wave * 0.3 + v.glow * 0.6, 0, Math.PI * 2)
+          ctx.fillStyle   = v.glow > 0.4 ? '#3366cc' : v.color
+          ctx.globalAlpha = Math.min(Math.max(baseA * 1.4, v.glow * 0.6), 0.55)
+          ctx.fill()
+        }
+        ctx.restore()
+      }
+
+      // ── 0. BACK MESH + DEPTH LINES (cara trasera + aristas Z del cubo) ───
+      {
+        ctx.save()
+
+        // Primero actualizar glow de back vectors y dibujar líneas de profundidad (Z)
+        for (let i = 0; i < backVectors.length; i++) {
+          const bv = backVectors[i]
+          const fv = vectors[i]   // nodo frontal correspondiente (mismo col/row)
+
+          // Glow del ratón en la malla trasera
+          const dv   = Math.sqrt((bv.rx - mouseX) ** 2 + (bv.ry - mouseY) ** 2)
+          const spot = dv < SPOT_RADIUS ? Math.pow(1 - dv / SPOT_RADIUS, 2) : 0
+          bv.glow = spot > bv.glow ? spot : bv.glow * 0.965
+
+          // Línea de profundidad: conecta nodo frontal con nodo trasero (arista Z del cubo)
+          const wave    = Math.sin((fv.rx + fv.ry) * waveFreq - time * waveSpeed) * 0.5 + 0.5
+          const depthG  = (fv.glow + bv.glow) * 0.5
+          const cf      = Math.min(fv.centerFade ?? 1, bv.centerFade ?? 1)
+          const depthA  = Math.max(0.30 + mBreath * 0.14 + wave * 0.14 + globalPulse * 0.08, depthG * 0.7) * cf
+          ctx.globalAlpha = depthA
+          ctx.strokeStyle = depthG > 0.3 ? '#4477ee' : '#2244bb'
+          ctx.lineWidth   = 0.6 + wave * 0.5 + depthG * 0.7
+          ctx.beginPath(); ctx.moveTo(fv.rx, fv.ry); ctx.lineTo(bv.rx, bv.ry); ctx.stroke()
+        }
+
+        // Cara trasera: líneas horizontales y verticales de la malla de fondo
+        for (let i = 0; i < backVectors.length; i++) {
+          const v    = backVectors[i]
+          const wave  = Math.sin((v.rx + v.ry) * waveFreq - time * waveSpeed) * 0.5 + 0.5
+          const cf    = v.centerFade ?? 1
+          const baseA = Math.max(0.30 + mBreath * 0.14 + wave * 0.14 + globalPulse * 0.08, v.glow * 0.52) * cf
+          const lw    = 0.3 + wave * 0.3 + v.glow * 0.4
+
+          if (v.col < bvcols - 1) {
+            const r = backVectors[v.row * bvcols + v.col + 1]
+            if (r) {
+              const trail = (v.glow + r.glow) * 0.5
+              ctx.globalAlpha = Math.max(baseA, trail * 0.52)
+              ctx.strokeStyle = trail > 0.35 ? '#2266dd' : '#1a3ecc'
+              ctx.lineWidth   = lw
+              ctx.beginPath(); ctx.moveTo(v.rx, v.ry); ctx.lineTo(r.rx, r.ry); ctx.stroke()
+            }
+          }
+          if (v.row < bvrows - 1) {
+            const b = backVectors[(v.row + 1) * bvcols + v.col]
+            if (b) {
+              const trail = (v.glow + b.glow) * 0.5
+              ctx.globalAlpha = Math.max(baseA, trail * 0.52)
+              ctx.strokeStyle = trail > 0.35 ? '#2266dd' : '#1a3ecc'
+              ctx.lineWidth   = lw
+              ctx.beginPath(); ctx.moveTo(v.rx, v.ry); ctx.lineTo(b.rx, b.ry); ctx.stroke()
+            }
+          }
+          // Nodo trasero
+          ctx.beginPath(); ctx.arc(v.rx, v.ry, 0.8 + wave * 0.4 + v.glow * 0.7, 0, Math.PI * 2)
+          ctx.fillStyle   = v.glow > 0.4 ? '#4488ff' : v.color
+          ctx.globalAlpha = Math.min(Math.max(baseA * 1.5, v.glow * 0.75), 0.70)
+          ctx.fill()
+        }
+
+        ctx.restore()
+      }
+
+      // ── 1. VECTOR MESH (cara frontal del cubo) ────────────────────────────
+      const baseAlpha = 0.30 + mBreath * 0.14 + globalPulse * 0.08     // 0.30 .. 0.52
 
       ctx.save()
       for (let i = 0; i < vectors.length; i++) {
         const v  = vectors[i]
 
+        // Ola diagonal por nodo (mismo sistema que back layer)
+        const wave  = Math.sin((v.rx + v.ry) * waveFreq - time * waveSpeed) * 0.5 + 0.5
+        const waveBoost = wave * 0.10 + globalPulse * 0.06
+
         // ── Segmento horizontal ────────────────────────────────────────
         if (v.col < vcols - 1) {
           const r     = vectors[v.row * vcols + v.col + 1]
-          const trail = (v.glow + r.glow) * 0.5   // media → bordes más difusos
-          const alpha = Math.max(baseAlpha, trail * 0.68)
+          const trail = (v.glow + r.glow) * 0.5
+          const alpha = Math.max(baseAlpha + waveBoost, trail * 0.68)
           ctx.globalAlpha = alpha
-          ctx.strokeStyle = trail > 0.4 ? '#00aaff' : '#1a4fff'
-          ctx.lineWidth   = 0.4 + trail * 0.55
+          ctx.strokeStyle = trail > 0.4 ? '#00aaff' : (wave > 0.65 ? '#2255dd' : '#1a4fff')
+          ctx.lineWidth   = 0.3 + wave * 0.4 + trail * 0.55
           ctx.beginPath(); ctx.moveTo(v.rx, v.ry); ctx.lineTo(r.rx, r.ry); ctx.stroke()
         }
 
@@ -321,18 +670,18 @@ export default function AnimatedBackground() {
         if (v.row < vrows - 1) {
           const b     = vectors[(v.row + 1) * vcols + v.col]
           const trail = (v.glow + b.glow) * 0.5
-          const alpha = Math.max(baseAlpha, trail * 0.68)
+          const alpha = Math.max(baseAlpha + waveBoost, trail * 0.68)
           ctx.globalAlpha = alpha
-          ctx.strokeStyle = trail > 0.4 ? '#00aaff' : '#1a4fff'
-          ctx.lineWidth   = 0.4 + trail * 0.55
+          ctx.strokeStyle = trail > 0.4 ? '#00aaff' : (wave > 0.65 ? '#2255dd' : '#1a4fff')
+          ctx.lineWidth   = 0.3 + wave * 0.4 + trail * 0.55
           ctx.beginPath(); ctx.moveTo(v.rx, v.ry); ctx.lineTo(b.rx, b.ry); ctx.stroke()
         }
 
         // ── Nodo ───────────────────────────────────────────────────────
-        const nodeDot = Math.max(baseAlpha * 1.4, v.glow * 1.1)
+        const nodeDot = Math.max(baseAlpha * 1.4 + waveBoost, v.glow * 1.1)
         if (nodeDot > 0.006) {
-          ctx.beginPath(); ctx.arc(v.rx, v.ry, 1.2 + v.glow * 0.9, 0, Math.PI * 2)
-          ctx.fillStyle   = v.glow > 0.5 ? '#00cfff' : '#3366ff'
+          ctx.beginPath(); ctx.arc(v.rx, v.ry, 1.0 + wave * 0.6 + v.glow * 0.9, 0, Math.PI * 2)
+          ctx.fillStyle   = v.glow > 0.5 ? '#00cfff' : (wave > 0.7 ? '#4488ff' : '#3366ff')
           ctx.globalAlpha = Math.min(nodeDot, 0.9)
           ctx.fill()
         }
@@ -386,6 +735,10 @@ export default function AnimatedBackground() {
       }
       wasActive = isActive
 
+      // ── 3. B OUTLINE (hover, detrás de las partículas) ───────────────
+      outlineOpacity += ((isActive ? 1 : 0) - outlineOpacity) * 0.07
+      drawBOutline(outlineOpacity)
+
       particles.forEach(p => {
         p.changeTimer--
         if (p.changeTimer <= 0) {
@@ -438,7 +791,7 @@ export default function AnimatedBackground() {
         ctx.restore()
       })
 
-      // ── 3. CURSOR ─────────────────────────────────────────────────────
+      // ── 4. CURSOR ─────────────────────────────────────────────────────
       drawCursor()
       animFrameId = requestAnimationFrame(animate)
     }
@@ -470,6 +823,8 @@ export default function AnimatedBackground() {
     glowCanvasHvr = makeGlowCanvas(canvas.width, canvas.height, GLOW_BLUR_HOVER)
     initParticles(canvas.width, canvas.height)
     buildVectors(canvas.width, canvas.height)
+    buildBackVectors(canvas.width, canvas.height)
+    buildThirdVectors(canvas.width, canvas.height)
     computeBMask()
     animate()
 

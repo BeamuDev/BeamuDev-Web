@@ -13,11 +13,11 @@ export default function Hero() {
         <div className="flex items-center justify-center gap-6 mb-4">
           <span className="w-1 h-1 rounded-full bg-white/40 inline-block" />
           <h1 className="text-2xl font-light leading-snug tracking-wide">
-            Alejandro Beamud Romero.
+            Alejandro Beamud Romero
             <br />
-            <span className="opacity-80">Profesor de FP de Informática.</span>
+            <span className="opacity-80">Profesor de FP de Informática</span>
             <br />
-            <span className="opacity-60">Formando a los que no se conforman.</span>
+            <span className="opacity-60">Formando a los que no se conforman</span>
           </h1>
           <span className="w-1 h-1 rounded-full bg-white/40 inline-block" />
         </div>
